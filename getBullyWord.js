@@ -1,7 +1,7 @@
 const OpenAI = require("openai");
 
 const openai = new OpenAI({
-  apiKey: "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",
+  apiKey: process.env.OPENAI_API_KEY,
 });
 
 const getBullyWord = async (feedback) => {
