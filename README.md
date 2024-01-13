@@ -23,7 +23,8 @@ This repository contains a WhatsApp Group Chat Moderation Bot that diligently mo
 ## Prerequisites to Run the WhatsApp Bot
 
 - Node.js installed on your system.
-- A valid API key for the OpenAI GPT-3.5 Turbo model.
+- A Finetuned model on open ai to detect cyber bullying
+- A valid API key for the fine tuned model.
 
 ## Installation
 
