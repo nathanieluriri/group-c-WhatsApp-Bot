@@ -1,7 +1,7 @@
 const OpenAI = require("openai");
 
 const openai = new OpenAI({
-  apiKey: "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",
+  apiKey: "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",
 });
 
 const getBullyWord = async (feedback) => {
@@ -18,7 +18,7 @@ const getBullyWord = async (feedback) => {
           content: feedback,
         },
       ],
-      model: "ft:gpt-3.5-turbo-1106:group-c::8YhXd5R5",
+      model: "ft:gpt-3.5-turbo-1106:group-c::8YTKwLjB",
     });
     console.log(completion.choices[0].message.content);
     return completion.choices[0].message.content;
