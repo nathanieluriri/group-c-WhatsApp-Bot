@@ -4,34 +4,21 @@ const {
   useMultiFileAuthState,
 } = require("@whiskeysockets/baileys");
 const P = require("pino");
-const getBullyWordFunction = require("./getBullyWord");
+const getBullyWord = require("./getBullyWord");
 
-// Constants
 const AUTH_FOLDER = "auth";
 let messageStore = {};
 
-// Utility Functions
+const generateRandomZeroOrOne = () => Math.round(Math.random());
 
-/**
- * Retrieve the last message from the message store for a given remoteJid.
- */
 const getLastMessageInChat = async (remoteJid) => {
-  try {
-    const messages = messageStore[remoteJid] || [];
-    return messages.length > 0 ? messages[messages.length - 1] : null;
-  } catch (error) {
-    console.error(`Error getting last message in chat ${remoteJid}:`, error);
-    throw error;
-  }
+  const messages = messageStore[remoteJid] || [];
+  return messages.length > 0 ? messages[messages.length - 1] : null;
 };
 
-/**
- * Send a warning message to the specified remoteJid about the inappropriate content from a sender.
- */
-const sendWarningMessage = async (sock, remoteJid, senderId) => {
+const sendWarningMessage = async (sock, remoteJid, senderId, text) => {
   const senderName = messageStore[senderId]?.senderName || "Unknown";
-  const warningText = `Warning: group participant ${senderName} has sent an inappropriate message. Inappropriate messages are not allowed on this group 😡.`;
-
+  const warningText = `Warning: group participant ${senderName} has sent "${text}" which is an inappropriate message. Inappropriate messages are not allowed on this group 😡.`;
   try {
     await sock.sendMessage(remoteJid, { text: warningText });
   } catch (error) {
@@ -39,50 +26,46 @@ const sendWarningMessage = async (sock, remoteJid, senderId) => {
   }
 };
 
-// Message Processing Functions
-
-/**
- * Process a message to check for inappropriate content and other actions.
- */
 const processMessage = async (key, message, sock) => {
-  if ((message && message.conversation) || message.extendedTextMessage.text) {
-    let text = message.conversation || message.extendedTextMessage.text;
+  if (!message) return;
 
-    if (key.participant) {
-      const senderId = key.participant;
-      const senderName = senderId.split("@")[0];
-      messageStore[senderId] = { senderName };
-      const me = senderId.slice(0, 12);
-      text = text.replace(/\@me\b/g, `@${me}`);
-    }
+  const text = message.conversation || message.extendedTextMessage?.text;
+  if (!text) return;
 
-    console.log(`New Message: ${text}`);
-    const bullyword = await getBullyWordFunction(text);
+  const senderId = key.participant;
+  const senderName = senderId.split("@")[0];
+  messageStore[senderId] = { senderName };
 
-    if (bullyword === "*&1@^") {
-      await deleteAndWarn(sock, key.id, key.remoteJid, key.participant);
-    } else if (bullyword === "*&0@^") {
+  const bullyword = await getBullyWord(text);
+  const num = generateRandomZeroOrOne();
+  switch (bullyword) {
+    case "*&1@^":
+      await deleteAndWarn(sock, key.id, key.remoteJid, senderId, text);
+      break;
+    case "*&0@^":
       console.log("Not a bully word");
-    } else if (text.toLowerCase() === "who are you") {
-      sendBotHiMessage(
-        sock,
-        "I'm a cyberbully detection Bot Built By Group 3 😌 and Samixx is awesome 😌😌!!",
-        key.remoteJid
-      );
-    }
-  } else {
-    console.log("Invalid message structure:", message);
+      break;
+    case "&1@^":
+      if (num === 1) {
+        await deleteAndWarn(sock, key.id, key.remoteJid, senderId, text);
+      } else {
+        const participantId = senderId.split("@")[0];
+        await sock.sendMessage(key.remoteJid, {
+          text: `@${participantId} be careful, this message "${text}" is not accepted on the group. It would be deleted next time`,
+          mentions: [senderId],
+        });
+      }
+      break;
+    case "&0@^":
+      console.log("Totally Clean!");
+      break;
   }
 };
 
-/**
- * Process receipt updates for message status.
- */
 const processReceiptUpdate = async (receiptUpdate, sock) => {
   try {
     const { key, receipt } = receiptUpdate;
     console.log(`Received receipt for message ${key.id}:`, receipt);
-
     const lastMessage = await getLastMessageInChat(key.remoteJid);
     if (lastMessage && lastMessage.key.id === key.id) {
       lastMessage.status = receipt.type;
@@ -96,28 +79,20 @@ const processReceiptUpdate = async (receiptUpdate, sock) => {
   }
 };
 
-/**
- * Delete an offensive message and send a warning to the sender.
- */
-const deleteAndWarn = async (sock, messageId, remoteJid, senderId) => {
-  await sendWarningMessage(sock, remoteJid, senderId);
-
-  // Additional logic to delete the message can be added here as per your requirement.
+const deleteAndWarn = async (sock, messageId, remoteJid, senderId, text) => {
+  console.log("Attempting to delete message with ID:", messageId);
+  await sendWarningMessage(sock, remoteJid, senderId, text);
+  await sock.sendMessage(remoteJid, {
+    delete: { id: messageId, fromMe: false, remoteJid, participant: senderId },
+  });
 };
 
-// Event Processing Functions
-
-/**
- * Process the incoming events to handle various actions.
- */
 const run = async (sock, events) => {
   if (events["messages.upsert"]) {
-    const { messages } = events["messages.upsert"];
-    for (const message of messages) {
+    for (const message of events["messages.upsert"].messages) {
       await processMessage(message.key, message.message, sock);
     }
   }
-
   if (events["message-receipt.update"]) {
     for (const receiptUpdate of events["message-receipt.update"]) {
       await processReceiptUpdate(receiptUpdate, sock);
@@ -125,18 +100,13 @@ const run = async (sock, events) => {
   }
 };
 
-/**
- * Handle the connection events and perform actions accordingly.
- */
 const processEvents = async (sock, events) => {
   console.log("Received Events:", events);
-
   if (events["connection.update"]) {
     const { connection, lastDisconnect, qr } = events["connection.update"];
     if (qr) {
       console.log("QR Code Received:", qr);
     }
-
     if (connection === "close") {
       if (
         lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut
@@ -146,30 +116,19 @@ const processEvents = async (sock, events) => {
         console.log("You disconnected because you logged out");
       }
     }
-
     if (connection === "open") {
       console.log("Connection is open. Checking for messages.");
     }
   }
-
   await run(sock, events);
 };
 
-// Connection Functions
-
-/**
- * Restart the connection.
- */
 const restart = async (sock) => {
   await connect(sock);
 };
 
-/**
- * Establish a connection to WhatsApp.
- */
 const connect = async () => {
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
-
   const newSock = makeWASocket({
     printQRInTerminal: true,
     auth: state,
@@ -179,22 +138,15 @@ const connect = async () => {
 
   newSock.ev.process((events) => processEvents(newSock, events));
   newSock.ev.on("creds.update", saveCreds);
-
   return newSock;
 };
 
-// Main Function
-
-/**
- * Initialize the application.
- */
 const main = async () => {
   try {
-    let sock = await connect();
+    await connect();
   } catch (error) {
     console.error("An error occurred:", error);
   }
 };
 
-// Start the application
 main();
